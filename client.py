@@ -13,7 +13,7 @@
 
 from argparse import ArgumentParser
 import json
-from helper_control import TestClient
+from iperf_control import TestClient
 
 def main():
 

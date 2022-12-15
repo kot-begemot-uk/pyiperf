@@ -7,7 +7,7 @@ import socket
 import random
 import psutil
 import threading
-from helper_data import UDPSender
+from iperf_data import UDPSender
 
 #IPERF FSM STATES
 
