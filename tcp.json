@@ -1,0 +1,11 @@
+{   
+    "tcp":true,
+    "omit":0,
+    "time":10,
+    "num":0,
+    "blockcount":0,
+    "parallel":1,
+    "len":131072,
+    "pacing_timer":100,
+    "client_version":"3.11"
+}

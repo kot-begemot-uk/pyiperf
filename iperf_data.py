@@ -122,24 +122,25 @@ class DataServer(UDPServer):
         self.worker.start()
 
 
-class UDPSender():
+class Sender():
     '''Iperf compatible sender'''
-    def __init__(self, target, stream_id, params):
-        self.target = target
+    def __init__(self, config, params, stream_id):
+        self.config = config
         self.params = params
-        self.buff = bytearray(self.params["MSS"])
+        try:
+            self.buff = bytearray(self.params["MSS"])
+        except KeyError:
+            self.buff = bytearray(self.params["len"])
+
         self.header = Header()
         self.worker = None
         self.done = False
         self.result = {"id":stream_id}
+        self.total = 0
 
     def send(self, now):
         '''Send a UDP frame with appropriate information for jitter/delay'''
-        self.header.packet_count = self.header.packet_count + 1
-        self.header.sec = int(abs(now))
-        self.header.usec = int((now - self.header.sec) * 1E6)
-        self.header.pack_into(self.buff)
-        self.sock.send(self.buff)
+        self.total = self.total + self.sock.send(self.buff)
 
     def shutdown(self):
         '''Shutdown the server'''
@@ -158,8 +159,10 @@ class UDPSender():
                     break
         except ConnectionRefusedError:
             pass
+        except ConnectionResetError:
+            pass
     
-        self.result.update({"bytes": self.params["MSS"] * self.header.packet_count,
+        self.result.update({"bytes": self.total,
                         "retransmits": 0,
                         "jitter": 0.0,
                         "errors":0,
@@ -170,14 +173,39 @@ class UDPSender():
     def connect(self):
         '''Connect to the other side'''
 
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.connect(self.target)
-        self.sock.send(UDP_CONNECT_MSG)
-        if (struct.unpack("i", self.sock.recv(4))[0] == 0x39383736):
-            return True
-        return False
+        self.sock.connect((self.config["target"], self.config["data_port"]))
 
     def start(self):
         '''Run a sender'''
         self.worker = threading.Thread(target=self.run_test, daemon=1)
         self.worker.start()
+
+class UDPSender(Sender):
+    
+    def send(self, now):
+        '''Send a UDP frame with appropriate information for jitter/delay'''
+        self.header.packet_count = self.header.packet_count + 1
+        self.header.sec = int(abs(now))
+        self.header.usec = int((now - self.header.sec) * 1E6)
+        self.header.pack_into(self.buff)
+        super().send(now)
+
+    def connect(self):
+        '''Connect to the other side'''
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        super().connect()
+        self.sock.send(UDP_CONNECT_MSG)
+        if (struct.unpack("i", self.sock.recv(4))[0] == 0x39383736):
+            return True
+        return False
+ 
+class TCPSender(Sender):
+    
+    def connect(self):
+        '''Connect to the other side'''
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        super().connect()
+        self.sock.send(self.config["cookie"])
+        return True
+        
+            

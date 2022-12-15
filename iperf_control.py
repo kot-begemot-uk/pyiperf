@@ -7,7 +7,7 @@ import socket
 import random
 import psutil
 import threading
-from iperf_data import UDPSender
+from iperf_data import UDPSender, TCPSender
 
 #IPERF FSM STATES
 
@@ -141,13 +141,16 @@ class TestClient():
 
     def create_streams(self):
         '''Create Stream'''
-        if self.params.get("udp"):
-            for stream_id in range(self.params["parallel"]):
-                self.tx_streams.append(UDPSender((self.config["target"], self.config["data_port"]), stream_id + 1, self.params))
-            for stream in self.tx_streams:
-                stream.connect()
-            return True
-        return False # unsupported protocol
+        if self.params.get("udp") is not None:
+            self.params["MSS"] = self.ctrl_sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_MAXSEG)
+        for stream_id in range(self.params["parallel"]):
+            if self.params.get("udp") is not None:
+                self.tx_streams.append(UDPSender(self.config, self.params, stream_id + 1))
+            if self.params.get("tcp") is not None:
+                self.tx_streams.append(TCPSender(self.config, self.params, stream_id + 1))
+        for stream in self.tx_streams:
+            stream.connect()
+        return True
 
     def start_test(self):
         '''Start Stream'''
@@ -182,9 +185,9 @@ class TestClient():
         print("My Result {}".format(self.results))
         print("Server Result {}".format(self.server_result))
         self.ctrl_sock.close()
-        if self.timers["end"] is not None:
+        if self.timers.get("end") is not None:
             self.timers["end"].cancel()
-        if self.timers["failsafe"] is not None:
+        if self.timers.get("failsafe") is not None:
             self.timers["failsafe"].cancel()
         self.test_ended = True
         return False 
@@ -228,10 +231,10 @@ class TestClient():
     def authorize(self):
         '''Perform initial handshake'''
         self.ctrl_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        self.ctrl_sock.send(self.make_cookie())
+        self.config["cookie"] = self.make_cookie()
+        self.ctrl_sock.send(self.config["cookie"])
         if self.params.get("MSS") is not None:
             return
-        self.params["MSS"] = self.ctrl_sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_MAXSEG)
 
     def run(self):
         '''Run the client'''
