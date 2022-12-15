@@ -1,0 +1,6 @@
+{   
+    "target":"localhost",
+    "config_port":5201,
+    "data_port":5202,
+    "compat": 0
+}
