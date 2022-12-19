@@ -123,7 +123,7 @@ class DataServer(UDPServer):
 
 
 class Client():
-    '''Iperf compatible sender'''
+    '''Iperf compatible sender/receiver'''
     def __init__(self, config, params, stream_id):
         self.config = config
         self.params = params
@@ -140,12 +140,16 @@ class Client():
         self.result = {"id":stream_id}
         self.total = 0
         self.sock = None
+        self.start_time = 0
 
     # pylint: disable=unused-argument
     def send(self, now):
         '''Send a UDP frame with appropriate information for jitter/delay'''
         try:
-            self.total = self.total + self.sock.send(self.buff)
+            if (not now == self.start_time) and \
+               self.total/(now - self.start_time) <= self.params["bandwidth"]/8 or \
+               self.params["bandwidth"] == 0:
+                self.total = self.total + self.sock.send(self.buff)
         except BlockingIOError:
             pass
 
@@ -167,16 +171,15 @@ class Client():
 
     def run_test(self):
         '''Run the actual test'''
-        start = now = time.clock_gettime(time.CLOCK_MONOTONIC)
+        self.start_time = now = time.clock_gettime(time.CLOCK_MONOTONIC)
         try:
-            while now < start + self.params["time"]:
+            while now < self.start_time + self.params["time"]:
                 if self.params.get("reverse") is None:
                     self.send(now)
                 else:
                     self.receive(now)
                 now = time.clock_gettime(time.CLOCK_MONOTONIC)
                 if self.done: # reading/storing a single var in python is atomic
-                    print("test run done")
                     break
         except ConnectionRefusedError:
             pass
@@ -189,7 +192,7 @@ class Client():
                         "errors": self.counters.cnt_error,
                         "packets": self.counters.packet_count,
                         "start_time": 0,
-                        "end_time":now - start})
+                        "end_time":now - self.start_time})
 
     def connect(self):
         '''Connect to the other side'''
