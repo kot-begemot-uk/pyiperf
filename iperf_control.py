@@ -7,7 +7,7 @@ import socket
 import random
 import psutil
 import threading
-from iperf_data import UDPSender, TCPSender
+from iperf_data import UDPClient, TCPClient
 
 #IPERF FSM STATES
 
@@ -145,9 +145,9 @@ class TestClient():
             self.params["MSS"] = self.ctrl_sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_MAXSEG)
         for stream_id in range(self.params["parallel"]):
             if self.params.get("udp") is not None:
-                self.tx_streams.append(UDPSender(self.config, self.params, stream_id + 1))
+                self.tx_streams.append(UDPClient(self.config, self.params, stream_id + 1))
             if self.params.get("tcp") is not None:
-                self.tx_streams.append(TCPSender(self.config, self.params, stream_id + 1))
+                self.tx_streams.append(TCPClient(self.config, self.params, stream_id + 1))
         for stream in self.tx_streams:
             stream.connect()
         return True

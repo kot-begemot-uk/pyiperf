@@ -91,8 +91,8 @@ class DataRequestHandler(BaseRequestHandler):
 
     def handle(self):
 
+        #pylint: disable=unused-variable
         (addr, req) = self.request
-
 
         buff = req.recv(self.server.bufsize)
         if buff is not None:
@@ -122,7 +122,7 @@ class DataServer(UDPServer):
         self.worker.start()
 
 
-class Sender():
+class Client():
     '''Iperf compatible sender'''
     def __init__(self, config, params, stream_id):
         self.config = config
@@ -132,15 +132,28 @@ class Sender():
         except KeyError:
             self.buff = bytearray(self.params["len"])
 
-        self.header = Header()
+        self.length = len(self.buff)
+
+        self.counters = Counters()
         self.worker = None
         self.done = False
         self.result = {"id":stream_id}
         self.total = 0
+        self.sock = None
 
+    # pylint: disable=unused-argument
     def send(self, now):
         '''Send a UDP frame with appropriate information for jitter/delay'''
         self.total = self.total + self.sock.send(self.buff)
+
+    # pylint: disable=unused-argument
+    def receive(self, now):
+        '''Send a UDP frame with appropriate information for jitter/delay'''
+        try:
+            self.buff = self.sock.recv(self.length)
+            self.total = self.total + len(self.buff)
+        except BlockingIOError:
+            pass
 
     def shutdown(self):
         '''Shutdown the server'''
@@ -153,7 +166,10 @@ class Sender():
         start = now = time.clock_gettime(time.CLOCK_MONOTONIC)
         try:
             while now < start + self.params["time"]:
-                self.send(now)
+                if self.params.get("reverse") is None:
+                    self.send(now)
+                else:
+                    self.receive(now)
                 now = time.clock_gettime(time.CLOCK_MONOTONIC)
                 if self.done: # reading/storing a single var in python is atomic
                     break
@@ -161,12 +177,14 @@ class Sender():
             pass
         except ConnectionResetError:
             pass
-    
+
+        print("Finished test run")
+
         self.result.update({"bytes": self.total,
                         "retransmits": 0,
-                        "jitter": 0.0,
-                        "errors":0,
-                        "packets": self.header.packet_count,
+                        "jitter": self.counters.jitter,
+                        "errors": self.counters.cnt_error,
+                        "packets": self.counters.packet_count,
                         "start_time": 0,
                         "end_time":now - start})
 
@@ -180,32 +198,42 @@ class Sender():
         self.worker = threading.Thread(target=self.run_test, daemon=1)
         self.worker.start()
 
-class UDPSender(Sender):
-    
+class UDPClient(Client):
+    '''UDP Specific Client'''
+
     def send(self, now):
         '''Send a UDP frame with appropriate information for jitter/delay'''
-        self.header.packet_count = self.header.packet_count + 1
-        self.header.sec = int(abs(now))
-        self.header.usec = int((now - self.header.sec) * 1E6)
-        self.header.pack_into(self.buff)
+        self.counters.parsed.packet_count = self.counters.parsed.packet_count + 1
+        self.counters.parsed.sec = int(abs(now))
+        self.counters.parsed.usec = int((now - self.counters.parsed.sec) * 1E6)
+        self.counters.parsed.pack_into(self.buff)
         super().send(now)
+
+    def receive(self, now):
+        '''RX a UDP frame with appropriate information for jitter/delay'''
+        super().receive(now)
+        if len(self.buff) > 0:
+            self.counters.process_header(self.buff)
 
     def connect(self):
         '''Connect to the other side'''
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         super().connect()
         self.sock.send(UDP_CONNECT_MSG)
-        if (struct.unpack("i", self.sock.recv(4))[0] == 0x39383736):
+        if struct.unpack("i", self.sock.recv(4))[0] == 0x39383736:
             return True
+        if self.params.get("reverse") is not None:
+            self.sock.setblocking(False)
         return False
- 
-class TCPSender(Sender):
-    
+
+class TCPClient(Client):
+    '''UDP Specific Client'''
+
     def connect(self):
         '''Connect to the other side'''
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         super().connect()
         self.sock.send(self.config["cookie"])
+        if self.params.get("reverse") is not None:
+            self.sock.setblocking(False)
         return True
-        
-            
