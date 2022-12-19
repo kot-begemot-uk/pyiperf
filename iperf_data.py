@@ -144,13 +144,16 @@ class Client():
     # pylint: disable=unused-argument
     def send(self, now):
         '''Send a UDP frame with appropriate information for jitter/delay'''
-        self.total = self.total + self.sock.send(self.buff)
+        try:
+            self.total = self.total + self.sock.send(self.buff)
+        except BlockingIOError:
+            pass
 
     # pylint: disable=unused-argument
     def receive(self, now):
         '''Send a UDP frame with appropriate information for jitter/delay'''
         try:
-            self.buff = self.sock.recv(self.length)
+            self.buff = self.sock.recv(self.length, socket.MSG_DONTWAIT)
             self.total = self.total + len(self.buff)
         except BlockingIOError:
             pass
@@ -160,6 +163,7 @@ class Client():
         self.done = True
         if self.worker is not None:
             self.worker.join()
+        self.sock.close()
 
     def run_test(self):
         '''Run the actual test'''
@@ -172,13 +176,12 @@ class Client():
                     self.receive(now)
                 now = time.clock_gettime(time.CLOCK_MONOTONIC)
                 if self.done: # reading/storing a single var in python is atomic
+                    print("test run done")
                     break
         except ConnectionRefusedError:
             pass
         except ConnectionResetError:
             pass
-
-        print("Finished test run")
 
         self.result.update({"bytes": self.total,
                         "retransmits": 0,
@@ -195,7 +198,7 @@ class Client():
 
     def start(self):
         '''Run a sender'''
-        self.worker = threading.Thread(target=self.run_test, daemon=1)
+        self.worker = threading.Thread(target=self.run_test)
         self.worker.start()
 
 class UDPClient(Client):
@@ -222,8 +225,7 @@ class UDPClient(Client):
         self.sock.send(UDP_CONNECT_MSG)
         if struct.unpack("i", self.sock.recv(4))[0] == 0x39383736:
             return True
-        if self.params.get("reverse") is not None:
-            self.sock.setblocking(False)
+        self.sock.setblocking(False)
         return False
 
 class TCPClient(Client):
@@ -234,6 +236,5 @@ class TCPClient(Client):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         super().connect()
         self.sock.send(self.config["cookie"])
-        if self.params.get("reverse") is not None:
-            self.sock.setblocking(False)
+        self.sock.setblocking(False)
         return True
