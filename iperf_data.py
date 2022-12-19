@@ -146,9 +146,10 @@ class Client():
     def send(self, now):
         '''Send a UDP frame with appropriate information for jitter/delay'''
         try:
-            if (not now == self.start_time) and \
+            if self.params.get("bandwidth") is None or \
+               ((not now == self.start_time) and \
                self.total/(now - self.start_time) <= self.params["bandwidth"]/8 or \
-               self.params["bandwidth"] == 0:
+               self.params["bandwidth"] == 0):
                 self.total = self.total + self.sock.send(self.buff)
         except BlockingIOError:
             pass
@@ -184,6 +185,8 @@ class Client():
         except ConnectionRefusedError:
             pass
         except ConnectionResetError:
+            pass
+        except BrokenPipeError:
             pass
 
         self.result.update({"bytes": self.total,

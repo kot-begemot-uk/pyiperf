@@ -143,11 +143,16 @@ class TestClient():
         '''Create Stream'''
         if self.params.get("udp") is not None:
             self.params["MSS"] = self.ctrl_sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_MAXSEG)
+        off = 1
         for stream_id in range(self.params["parallel"]):
+            # This is a bug in iperf. It numbers treams in the following ingenious way
+            # 1 3 4...
+            if stream_id == 1:
+                off = 2
             if self.params.get("udp") is not None:
-                self.tx_streams.append(UDPClient(self.config, self.params, stream_id + 1))
+                self.tx_streams.append(UDPClient(self.config, self.params, stream_id + off))
             if self.params.get("tcp") is not None:
-                self.tx_streams.append(TCPClient(self.config, self.params, stream_id + 1))
+                self.tx_streams.append(TCPClient(self.config, self.params, stream_id + off))
         for stream in self.tx_streams:
             stream.connect()
         return True
