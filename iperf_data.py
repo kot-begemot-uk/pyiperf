@@ -1,7 +1,6 @@
 #!/usr/bin/python3
 '''Iperf external helper'''
 
-from socketserver import UDPServer, BaseRequestHandler
 import struct
 import socket
 import threading
@@ -85,42 +84,6 @@ class Counters():
         diff = abs(transit - self.prev_transit)
         self.prev_transit = transit
         self.jitter = self.jitter + (diff - self.jitter)/16.0
-
-class DataRequestHandler(BaseRequestHandler):
-    '''Handler for UDP Data'''
-
-    def handle(self):
-
-        #pylint: disable=unused-variable
-        (addr, req) = self.request
-
-        buff = req.recv(self.server.bufsize)
-        if buff is not None:
-            length = len(buff)
-            if length > 0:
-                self.server.bytes_received = self.server.bytes_received + length
-            try:
-                counters = self.server.worker_data[threading.current_thread().getName()]
-            except KeyError:
-                counters = Counters()
-                self.server.worker_data[threading.current_thread().getName()] = counters
-            counters.process_header(buff)
-
-
-class DataServer(UDPServer):
-    '''Data channel server'''
-    def __init__(self, data, bufsize):
-        self.bufsize = bufsize
-        self.worker_data = {}
-        self.bytes_received = 0
-        self.worker = None
-        super().__init__(data, DataRequestHandler, True)
-
-    def start(self):
-        '''Run the Server side'''
-        self.worker = threading.Thread(target=self.serve_forever, name="UDP", daemon=1)
-        self.worker.start()
-
 
 class Client():
     '''Iperf compatible sender/receiver'''

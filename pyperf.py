@@ -15,13 +15,14 @@ from argparse import ArgumentParser
 import json
 import sys
 from iperf_control import TestClient
+from iperf_control_server import TestServer
 
 DEFAULT_CONFIG = "config-stock.json"
 DEFAULT_PARAMS = "params.json"
 NOT_SUPPORTED = "Not yet supported, use stock iperf3"
 
 UNSUPPORTED = [
-    'format', 'interval', 'pidfile', 'file', 'affinity', 'bind', 'bind_dev',
+    'format', 'pidfile', 'file', 'affinity', 'bind', 'bind_dev',
     'logfile', 'forceflush', 'timestamps', 'daemon', 'one_off', 'server_bitrate_limit',
     'idle_timeout', 'rsa_private_key_path', 'authorized_users_path', 'time_skew_threshold',
     'pacing_timer', 'fq_rate', 'bytes', 'blockcount', 'length', 'congestion',
@@ -60,7 +61,8 @@ def main():
     aparser.add_argument(
         '-i', '--interval',
         help='seconds between periodic throughput reports',
-        type=int)
+        type=int,
+        default=1)
 
     aparser.add_argument(
         '-I', '--pidfile',
@@ -344,15 +346,13 @@ def main():
 
     args = vars(aparser.parse_args())
 
-    print(args.keys())
-
     for unsupported in UNSUPPORTED:
-        if args.get(unsupported) is True: 
+        if args.get(unsupported) is True:
             print("Option {} is not yet supported".format(unsupported))
             sys.exit(1)
         if (args.get(unsupported) is not None) and \
             (args.get(unsupported) is not False) and \
-            (not args.get(unsupported) == 0): 
+            (not args.get(unsupported) == 0):
             print("Option {} is not yet supported".format(unsupported))
             sys.exit(1)
 
@@ -360,10 +360,21 @@ def main():
     config = json.load(open(args.get("config")))
     params = json.load(open(args.get("params")))
 
-    client = TestClient(config, params)
+    params["interval"] = args.get("interval")
 
-    client.run()
+    if args.get("client") is not None and args.get("server"):
+        print("You cannot select server and client mode at the same time")
+        sys.exit(1)
 
+    if args.get("client"):
+        client = TestClient(config, params)
+        return client.run()
+
+    if args.get("server"):
+        server = TestServer(config, params)
+        return server.run()
+
+    return 1
 
 if __name__ == "__main__":
     main()

@@ -77,7 +77,7 @@ class TestClient():
         self.result = None
         self.cpu_usage = None
         self.results = None
-        self.server_result = None
+        self.peer_result = None
         self.test_ended = False
         self.timers = {}
 
@@ -135,7 +135,7 @@ class TestClient():
         '''Exchange results at the end of test'''
         self.collate_results()
         if self.json_send(self.ctrl_sock, self.results):
-            self.server_result = self.json_recv(self.ctrl_sock)
+            self.peer_result = self.json_recv(self.ctrl_sock)
             return True
         return False
 
@@ -188,7 +188,7 @@ class TestClient():
         for stream in self.tx_streams:
             stream.shutdown()
         print("My Result {}".format(self.results))
-        print("Server Result {}".format(self.server_result))
+        print("Server Result {}".format(self.peer_result))
         self.ctrl_sock.close()
         if self.timers.get("end") is not None:
             self.timers["end"].cancel()
