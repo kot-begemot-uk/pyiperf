@@ -13,15 +13,16 @@ class UDPRequestHandler(BaseRequestHandler):
     def handle(self):
 
         #pylint: disable=unused-variable
-        (addr, req) = self.request.recv(self.server.bufsize)
+        buff = self.request[0]
+        addr = "{}:{}".format(self.client_address[0], self.client_address[1])
 
-        try:
-            if buf is not None:
+        if buff is not None:
+            if self.server.state.get(addr) is not None:
                 self.server.state[addr].process_header(buff)
                 self.server.bytes_received = self.server.bytes_received + len(buff)
-        except KeyError:
-            self.server.state[addr] = Counters()
-            self.request.sendto(struct.pack("i", UDP_CONNECT_REPLY), addr)
+            else:
+                self.server.state[addr] = Counters()
+                self.request[1].sendto(struct.pack("i", UDP_CONNECT_REPLY), self.client_address)
 
 
 class UDPDataServer(UDPServer):
@@ -34,9 +35,9 @@ class UDPDataServer(UDPServer):
         self.worker = None
         self.state = {}
         try:
-            self.bufsize = self.params["MSS"]
+            self.max_packet_size = self.params["MSS"]
         except KeyError:
-            self.bufsize = self.params["len"]
+            self.max_packet_size = self.params["len"]
 
         super().__init__((config["target"], config["data_port"]), UDPRequestHandler, True)
 

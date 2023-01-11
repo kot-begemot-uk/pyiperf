@@ -359,14 +359,36 @@ def main():
 
     config = json.load(open(args.get("config")))
     params = json.load(open(args.get("params")))
+    mappings = json.load(open("mappings.json", "r+"))
 
-    params["interval"] = args.get("interval")
+    for param, mapping in mappings.items():
+        if args.get(param) is not None:
+            try:
+                for conf in mapping["c"]:
+                    config[conf] = args[param]
+            except TypeError:
+                config[param] = args[param]
+            except KeyError:
+                pass
+
+            try:
+                for parm in mapping["p"]:
+                    params[parm] = args[param]
+            except TypeError:
+                params[param] = args[param]
+            except KeyError:
+                pass
 
     if args.get("client") is not None and args.get("server"):
         print("You cannot select server and client mode at the same time")
         sys.exit(1)
 
-    if args.get("client"):
+    if args.get("udp"):
+        params["udp"] = 1
+        del params["tcp"]
+
+    if args.get("client") is not None:
+        config["target"] = args["client"]
         client = TestClient(config, params)
         return client.run()
 

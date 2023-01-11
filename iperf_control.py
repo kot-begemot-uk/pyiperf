@@ -6,6 +6,7 @@ import json
 import socket
 import random
 import psutil
+import time
 import threading
 from iperf_data import UDPClient, TCPClient
 
@@ -34,6 +35,13 @@ STATE = "b"
 JSONL = "!i"
 RNDCHARS = "abcdefghijklmnopqrstuvwxyz234567"
 COOKIE_SIZE = 37
+
+def dumpbuff(buff):
+    '''Dump a buffer in hex'''
+    result = ""
+    for sym in buff:
+        result = result + "{:02X}".format(sym)
+    print(result)
 
 class TestClient():
     '''Iperf3 compatible test client'''
@@ -80,6 +88,7 @@ class TestClient():
         self.peer_result = None
         self.test_ended = False
         self.timers = {}
+        self.server = False
 
     @staticmethod
     def json_send(sock, data):
@@ -88,9 +97,11 @@ class TestClient():
         try:
             if sock.send(struct.pack(JSONL, len(buff))) < 4 or sock.send(buff) < len(buff):
                 return False
+            print("Sent {}".format(buff))
         except OSError:
             return False
         return True
+
 
     @staticmethod
     def json_recv(sock):
@@ -99,6 +110,7 @@ class TestClient():
             buff = sock.recv(4)
             if len(buff) < 4:
                 print("Short read {}".format(len(buff)))
+                dumpbuff(buff)
                 return None
             length = struct.unpack(JSONL, buff)[0]
             return json.loads(sock.recv(length))
@@ -134,6 +146,10 @@ class TestClient():
     def exchange_results(self):
         '''Exchange results at the end of test'''
         self.collate_results()
+        if self.server:
+            self.peer_result = self.json_recv(self.ctrl_sock)
+            self.json_send(self.ctrl_sock, self.results)    
+            return True
         if self.json_send(self.ctrl_sock, self.results):
             self.peer_result = self.json_recv(self.ctrl_sock)
             return True
@@ -160,6 +176,7 @@ class TestClient():
     def start_test(self):
         '''Start Stream'''
         self.cpu_usage = psutil.Process().cpu_times()
+        self.start_time = time.time()
 
         self.timers["end"] = threading.Timer(self.params["time"], self.end_test_timer).start()
         self.timers["failsafe"] = threading.Timer(self.params["time"] + 10, self.end_test_failsafe).start()
@@ -172,7 +189,7 @@ class TestClient():
     def end_test_timer(self):
         '''Timer to end the test'''
         self.timers["end"] = None
-        if self.config["compat"] == 1:
+        if self.config["compat"] == 1 and not self.server:
             self.ctrl_sock.send(struct.pack(STATE, TEST_END))
 
     def end_test_failsafe(self):
