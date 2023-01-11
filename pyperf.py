@@ -185,7 +185,7 @@ def main():
     aparser.add_argument(
         '-u', '--udp',
         help='use UDP instead of TCP',
-        type=str)
+        action='store_true')
 
     aparser.add_argument(
         '--connect-timeout',
@@ -390,11 +390,13 @@ def main():
     if args.get("client") is not None:
         config["target"] = args["client"]
         client = TestClient(config, params)
-        return client.run()
+        client.run()
 
     if args.get("server"):
-        server = TestServer(config, params)
-        return server.run()
+        while True:
+            server = TestServer(config, params)
+            if not server.run():
+                break
 
     return 1
 

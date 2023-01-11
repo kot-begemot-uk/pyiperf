@@ -5,9 +5,9 @@ import struct
 import json
 import socket
 import random
-import psutil
 import time
 import threading
+import psutil
 from iperf_data import UDPClient, TCPClient
 
 #IPERF FSM STATES
@@ -89,6 +89,8 @@ class TestClient():
         self.test_ended = False
         self.timers = {}
         self.server = False
+        self.needs_display = True
+        self.start_time = None
 
     @staticmethod
     def json_send(sock, data):
@@ -97,7 +99,6 @@ class TestClient():
         try:
             if sock.send(struct.pack(JSONL, len(buff))) < 4 or sock.send(buff) < len(buff):
                 return False
-            print("Sent {}".format(buff))
         except OSError:
             return False
         return True
@@ -109,8 +110,6 @@ class TestClient():
         try:
             buff = sock.recv(4)
             if len(buff) < 4:
-                print("Short read {}".format(len(buff)))
-                dumpbuff(buff)
                 return None
             length = struct.unpack(JSONL, buff)[0]
             return json.loads(sock.recv(length))
@@ -122,6 +121,7 @@ class TestClient():
     def make_cookie():
         '''Make a IPERF3 compatible "cookie"'''
         cookie = ""
+        # pylint: disable=unused-variable
         for index in range(COOKIE_SIZE):
             cookie = cookie + RNDCHARS[random.randrange(0, len(RNDCHARS))]
         return cookie.encode("ascii")
@@ -143,12 +143,19 @@ class TestClient():
             stream.shutdown()
             self.results["streams"].append(stream.result)
 
+    def display_results(self):
+        '''Display results'''
+        if self.needs_display:
+            self.needs_display = False
+            print("My result {}".format(self.results))
+            print("Peer result {}".format(self.peer_result))
+
     def exchange_results(self):
         '''Exchange results at the end of test'''
         self.collate_results()
         if self.server:
             self.peer_result = self.json_recv(self.ctrl_sock)
-            self.json_send(self.ctrl_sock, self.results)    
+            self.json_send(self.ctrl_sock, self.results)
             return True
         if self.json_send(self.ctrl_sock, self.results):
             self.peer_result = self.json_recv(self.ctrl_sock)
@@ -178,25 +185,30 @@ class TestClient():
         self.cpu_usage = psutil.Process().cpu_times()
         self.start_time = time.time()
 
-        self.timers["end"] = threading.Timer(self.params["time"], self.end_test_timer).start()
-        self.timers["failsafe"] = threading.Timer(self.params["time"] + 10, self.end_test_failsafe).start()
+        self.timers["end"] = threading.Timer(self.params["time"], self.end_test_timer)
+        self.timers["end"].start()
+        self.timers["failsafe"] = threading.Timer(self.params["time"] + 10, self.end_test_failsafe)
+        self.timers["failsafe"].start()
 
         for stream in self.tx_streams:
             stream.start()
 
-        return True # TODO: add error codes from streams
+        return True
 
     def end_test_timer(self):
         '''Timer to end the test'''
         self.timers["end"] = None
         if self.config["compat"] == 1 and not self.server:
-            self.ctrl_sock.send(struct.pack(STATE, TEST_END))
+            try:
+                self.ctrl_sock.send(struct.pack(STATE, TEST_END))
+            except OSError:
+                pass
 
     def end_test_failsafe(self):
         '''Failsafe - length + 10 seconds'''
         self.timers["failsafe"] = None
         self.state_transition(DISPLAY_RESULTS)
-        
+
 
     def end_test(self):
         '''Finish Test and clean up'''
@@ -204,15 +216,13 @@ class TestClient():
             return True
         for stream in self.tx_streams:
             stream.shutdown()
-        print("My Result {}".format(self.results))
-        print("Server Result {}".format(self.peer_result))
         self.ctrl_sock.close()
         if self.timers.get("end") is not None:
             self.timers["end"].cancel()
         if self.timers.get("failsafe") is not None:
             self.timers["failsafe"].cancel()
         self.test_ended = True
-        return False 
+        return False
 
     def connect(self):
         '''Connect to server'''
@@ -236,6 +246,7 @@ class TestClient():
         elif new_state == EXCHANGE_RESULTS:
             result = self.exchange_results()
         elif new_state == DISPLAY_RESULTS:
+            self.display_results()
             result = self.end_test()
         elif new_state == IPERF_DONE:
             result =  True
@@ -263,6 +274,11 @@ class TestClient():
 
         self.connect()
         self.authorize()
-        while self.state_transition(struct.unpack(STATE, self.ctrl_sock.recv(1))[0]):
-            pass
+        try:
+            while self.state_transition(struct.unpack(STATE, self.ctrl_sock.recv(1))[0]):
+                pass
+        except OSError:
+            self.state_transition(DISPLAY_RESULTS)
+        except KeyboardInterrupt:
+            self.state_transition(DISPLAY_RESULTS)
         self.end_test()

@@ -88,6 +88,6 @@ class TCPDataServer(TCPServer):
 
     def start(self):
         '''Run the Server side'''
-        
+
         self.worker = threading.Thread(target=self.serve_forever, name="UDP")
         self.worker.start()

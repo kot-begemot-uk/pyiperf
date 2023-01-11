@@ -7,6 +7,9 @@ import time
 import iperf_control
 from iperf_data_server import UDPDataServer, TCPDataServer
 
+IGNORE_IO_STATES = [iperf_control.EXCHANGE_RESULTS,
+                    iperf_control.DISPLAY_RESULTS,
+                    iperf_control.TEST_END]
 
 class TestServer(iperf_control.TestClient):
     '''Iperf3 compatible test server'''
@@ -17,17 +20,18 @@ class TestServer(iperf_control.TestClient):
 
         self.control_listener = None
         self.test_server = None
-        self.schedule = None
+        self.schedule = [(iperf_control.PARAM_EXCHANGE, 0.1)]
         self.start_time = None
         self.server = True
+        self.control_active = True
 
     def end_test(self):
         '''Cleanup Test'''
-        print("Cleaning up")
         super().end_test()
-        self.test_server.shutdown()
-        self.test_server.worker.join()
-        self.test_server = None
+        if self.test_server is not None:
+            self.test_server.shutdown()
+            self.test_server.worker.join()
+            self.test_server = None
 
     def collate_results(self):
         '''Collate Results'''
@@ -48,43 +52,53 @@ class TestServer(iperf_control.TestClient):
                 stream_id = 3
 
             self.results["streams"].append(entry)
-        
+
     def state_transition(self, new_state):
         '''Transition iperf state'''
 
         result = False
         peer_state = None
 
-        print("Requested state {}".format(new_state))
+        # These two states are special - we ignore anything from the peer
+        # while handling them
+        if self.control_active:
+            if not new_state in IGNORE_IO_STATES:
+                try:
+                    self.ctrl_sock.setblocking(False)
+                    buff = self.ctrl_sock.recv(1)
+                    if len(buff) > 0:
+                        peer_state = struct.unpack(iperf_control.STATE, buff)[0]
+                except BlockingIOError:
+                    pass
+                except OSError:
+                    new_state = iperf_control.TEST_END
+                    self.control_active = False
 
-        if not (new_state == iperf_control.EXCHANGE_RESULTS or new_state == iperf_control.DISPLAY_RESULTS):
             try:
-                self.ctrl_sock.setblocking(False)
-                buff = self.ctrl_sock.recv(1)
-                if len(buff) > 0:
-                    peer_state = struct.unpack(iperf_control.STATE, buff)[0]
-            except BlockingIOError:
-                pass
-        
-        self.ctrl_sock.setblocking(True)
+                self.ctrl_sock.setblocking(True)
+                if peer_state is None and (not self.state == new_state):
+                    self.ctrl_sock.send(struct.pack(iperf_control.STATE, new_state))
+            except OSError:
+                new_state = iperf_control.TEST_END
+                self.control_active = False
 
-        if peer_state is None and (not self.state == new_state):
-            print("Sending my state {} {}".format(new_state, struct.pack(iperf_control.STATE, new_state)))
-            self.ctrl_sock.send(struct.pack(iperf_control.STATE, new_state))
-        if peer_state is not None:
-            print("Set state from peer {}".format(peer_state))
-            new_state = peer_state
+            if peer_state is not None:
+                new_state = peer_state
 
         self.state = new_state
 
         if new_state == iperf_control.PARAM_EXCHANGE:
             self.params = self.json_recv(self.ctrl_sock)
-            if self.params.get("udp"):
-                self.test_server = UDPDataServer(self.config, self.params)
-            if self.params.get("tcp"):
-                self.test_server = TCPDataServer(self.config, self.params)
-            self.test_server.start()
-            result = True
+            if self.params is not None:
+                self.amend_schedule()
+                if self.params.get("udp"):
+                    self.test_server = UDPDataServer(self.config, self.params)
+                if self.params.get("tcp"):
+                    self.test_server = TCPDataServer(self.config, self.params)
+                self.test_server.start()
+                result = True
+            else:
+                return False
         elif new_state == iperf_control.TEST_START:
             result = self.start_test()
         elif new_state == iperf_control.CREATE_STREAMS:
@@ -95,11 +109,12 @@ class TestServer(iperf_control.TestClient):
             self.exchange_results()
             result = True
         elif new_state == iperf_control.DISPLAY_RESULTS:
+            self.display_results()
             result = True
         elif new_state == iperf_control.TEST_END:
-            print("Finishing up")
             self.state_transition(iperf_control.EXCHANGE_RESULTS)
             self.state_transition(iperf_control.DISPLAY_RESULTS)
+            self.end_test()
             result =  True
         elif new_state == iperf_control.SERVER_TERMINATE:
             self.state_transition(iperf_control.DISPLAY_RESULTS)
@@ -112,13 +127,12 @@ class TestServer(iperf_control.TestClient):
 
         return result
 
-    def create_schedule(self):
+    def amend_schedule(self):
         '''Create a test schedule'''
-        self.schedule = [
-            (iperf_control.PARAM_EXCHANGE, 0.1),
+        self.schedule.extend([
             (iperf_control.CREATE_STREAMS, 0.1),
             (iperf_control.TEST_START, 0.1)
-        ]
+        ])
         dur = 0
         while dur < self.params["time"] + 2:
             self.schedule.append(
@@ -129,16 +143,25 @@ class TestServer(iperf_control.TestClient):
 
     def run(self):
         '''Run the server'''
-        while True:
+        running = False
+        try:
             self.control_listener = \
                 socket.create_server((self.config["target"], self.config["config_port"]), reuse_port=True)
+            #pylint: disable=unused-variable
             self.ctrl_sock, addr = self.control_listener.accept()
+            running = True
             self.ctrl_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             self.control_listener.close()
             self.config["cookie"] = self.ctrl_sock.recv(iperf_control.COOKIE_SIZE)
-            self.create_schedule()
             for (state, duration) in self.schedule:
-                self.state_transition(state)
-                time.sleep(duration)
+                if self.state_transition(state):
+                    time.sleep(duration)
+                else:
+                    self.end_test()
+                    break
             self.end_test()
+        except KeyboardInterrupt:
+            if running:
+                self.state_transition(iperf_control.TEST_END)
+                return False
         return True
