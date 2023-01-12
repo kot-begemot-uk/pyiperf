@@ -14,6 +14,7 @@ import socket
 import time
 import iperf_control
 from iperf_data_server import UDPDataServer, TCPDataServer
+from iperf_utils import COOKIE_SIZE
 
 IGNORE_IO_STATES = [iperf_control.EXCHANGE_RESULTS,
                     iperf_control.DISPLAY_RESULTS,
@@ -96,7 +97,7 @@ class TestServer(iperf_control.TestClient):
         self.state = new_state
 
         if new_state == iperf_control.PARAM_EXCHANGE:
-            self.params = self.json_recv(self.ctrl_sock)
+            self.params = json_recv(self.ctrl_sock)
             if self.params is not None:
                 self.amend_schedule()
                 if self.params.get("udp"):
@@ -160,7 +161,7 @@ class TestServer(iperf_control.TestClient):
             running = True
             self.ctrl_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             self.control_listener.close()
-            self.config["cookie"] = self.ctrl_sock.recv(iperf_control.COOKIE_SIZE)
+            self.config["cookie"] = self.ctrl_sock.recv(COOKIE_SIZE)
             for (state, duration) in self.schedule:
                 if self.state_transition(state):
                     time.sleep(duration)

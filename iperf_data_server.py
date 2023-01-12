@@ -13,7 +13,7 @@ import struct
 import threading
 from socketserver import TCPServer, UDPServer, BaseRequestHandler
 from iperf_data import Counters, UDP_CONNECT_REPLY
-from iperf_control import COOKIE_SIZE
+from iperf_utils import COOKIE_SIZE
 
 class UDPRequestHandler(BaseRequestHandler):
     '''Handler for UDP Data'''

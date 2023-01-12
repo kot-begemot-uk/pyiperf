@@ -344,6 +344,11 @@ def main():
         help='path to the RSA public key used to encrypt authentication credentials',
         type=str)
 
+    aparser.add_argument(
+        '-U', '--plugin',
+        help='path to plugin to invoke',
+        type=str)
+
     args = vars(aparser.parse_args())
 
     for unsupported in UNSUPPORTED:

@@ -10,13 +10,13 @@
 # You may select, at your option, one of the above-listed licenses.
 
 import struct
-import json
 import socket
-import random
 import time
 import threading
 import psutil
+from iperf_utils import json_send, json_recv, make_cookie
 from iperf_data import UDPClient, TCPClient
+from iperf_data_plugin import PluginClient
 
 #IPERF FSM STATES
 
@@ -40,16 +40,6 @@ ACCESS_DENIED = -1
 SERVER_ERROR = -2
 
 STATE = "b"
-JSONL = "!i"
-RNDCHARS = "abcdefghijklmnopqrstuvwxyz234567"
-COOKIE_SIZE = 37
-
-def dumpbuff(buff):
-    '''Dump a buffer in hex'''
-    result = ""
-    for sym in buff:
-        result = result + "{:02X}".format(sym)
-    print(result)
 
 class TestClient():
     '''Iperf3 compatible test client'''
@@ -100,43 +90,9 @@ class TestClient():
         self.needs_display = True
         self.start_time = None
 
-    @staticmethod
-    def json_send(sock, data):
-        '''Send JSON data'''
-        buff = json.dumps(data).encode("ascii", "ignore")
-        try:
-            if sock.send(struct.pack(JSONL, len(buff))) < 4 or sock.send(buff) < len(buff):
-                return False
-        except OSError:
-            return False
-        return True
-
-
-    @staticmethod
-    def json_recv(sock):
-        '''Receive JSON data'''
-        try:
-            buff = sock.recv(4)
-            if len(buff) < 4:
-                return None
-            length = struct.unpack(JSONL, buff)[0]
-            return json.loads(sock.recv(length))
-        except OSError:
-            pass
-        return None
-
-    @staticmethod
-    def make_cookie():
-        '''Make a IPERF3 compatible "cookie"'''
-        cookie = ""
-        # pylint: disable=unused-variable
-        for index in range(COOKIE_SIZE):
-            cookie = cookie + RNDCHARS[random.randrange(0, len(RNDCHARS))]
-        return cookie.encode("ascii")
-
     def send_parameters(self):
         '''Exchange Test Params'''
-        return self.json_send(self.ctrl_sock, self.params)
+        return json_send(self.ctrl_sock, self.params)
 
     def collate_results(self):
         '''TX results'''
@@ -162,17 +118,17 @@ class TestClient():
         '''Exchange results at the end of test'''
         self.collate_results()
         if self.server:
-            self.peer_result = self.json_recv(self.ctrl_sock)
-            self.json_send(self.ctrl_sock, self.results)
+            self.peer_result = json_recv(self.ctrl_sock)
+            json_send(self.ctrl_sock, self.results)
             return True
-        if self.json_send(self.ctrl_sock, self.results):
-            self.peer_result = self.json_recv(self.ctrl_sock)
+        if json_send(self.ctrl_sock, self.results):
+            self.peer_result = json_recv(self.ctrl_sock)
             return True
         return False
 
     def create_streams(self):
         '''Create Stream'''
-        if self.params.get("udp") is not None:
+        if self.params.get("udp") is not None and self.ctrl_sock is not None:
             self.params["MSS"] = self.ctrl_sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_MAXSEG)
         off = 1
         for stream_id in range(self.params["parallel"]):
@@ -180,10 +136,13 @@ class TestClient():
             # 1 3 4...
             if stream_id == 1:
                 off = 2
-            if self.params.get("udp") is not None:
-                self.tx_streams.append(UDPClient(self.config, self.params, stream_id + off))
-            if self.params.get("tcp") is not None:
-                self.tx_streams.append(TCPClient(self.config, self.params, stream_id + off))
+            if self.config.get("plugin") is not None:
+                self.tx_streams.append(PluginClient(self.config, self.params, stream_id + off))
+            else:
+                if self.params.get("udp") is not None:
+                    self.tx_streams.append(UDPClient(self.config, self.params, stream_id + off))
+                if self.params.get("tcp") is not None:
+                    self.tx_streams.append(TCPClient(self.config, self.params, stream_id + off))
         for stream in self.tx_streams:
             stream.connect()
         return True
@@ -211,6 +170,8 @@ class TestClient():
                 self.ctrl_sock.send(struct.pack(STATE, TEST_END))
             except OSError:
                 pass
+            except AttributeError:
+                pass
 
     def end_test_failsafe(self):
         '''Failsafe - length + 10 seconds'''
@@ -222,9 +183,8 @@ class TestClient():
         '''Finish Test and clean up'''
         if self.test_ended:
             return True
-        for stream in self.tx_streams:
-            stream.shutdown()
-        self.ctrl_sock.close()
+        if self.ctrl_sock is not None:
+            self.ctrl_sock.close()
         if self.timers.get("end") is not None:
             self.timers["end"].cancel()
         if self.timers.get("failsafe") is not None:
@@ -272,7 +232,7 @@ class TestClient():
     def authorize(self):
         '''Perform initial handshake'''
         self.ctrl_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        self.config["cookie"] = self.make_cookie()
+        self.config["cookie"] = make_cookie()
         self.ctrl_sock.send(self.config["cookie"])
         if self.params.get("MSS") is not None:
             return
@@ -283,8 +243,11 @@ class TestClient():
         self.connect()
         self.authorize()
         try:
-            while self.state_transition(struct.unpack(STATE, self.ctrl_sock.recv(1))[0]):
-                pass
+            while True:
+                data = self.ctrl_sock.recv(1)
+                self.state_transition(struct.unpack(STATE, data)[0])
+        except struct.error:
+            self.state_transition(DISPLAY_RESULTS)
         except OSError:
             self.state_transition(DISPLAY_RESULTS)
         except KeyboardInterrupt:
