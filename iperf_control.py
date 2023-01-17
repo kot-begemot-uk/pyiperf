@@ -103,9 +103,13 @@ class TestClient():
         self.results["cpu_util_total"] = self.results["cpu_util_user"] + self.results["cpu_util_system"]
         self.results["sender_has_retransmits"] = 0
         self.results["streams"] = []
+
+
         for stream in self.tx_streams:
-            stream.shutdown()
+            stream.lock.acquire()
             self.results["streams"].append(stream.result)
+            stream.lock.release()
+            stream.shutdown()
 
     def display_results(self):
         '''Display results'''

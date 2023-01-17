@@ -44,8 +44,8 @@ static char *buffer;
 
 static int l, s, d;
 static int bufsize;
-static long bytes_sent;
-static long packets_sent;
+static long long bytes_sent;
+static long long packets_sent;
 
 struct header32 {
     u_int32_t sec, usec, counter;
@@ -143,25 +143,39 @@ static double time_now(void)
 {
     double result = 0.0;
     struct timespec ts;
-    if (clock_gettime(CLOCK_MONOTONIC, &ts)) {
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
         result = ts.tv_sec + ts.tv_nsec / 1000000000;
     }
     return result;
 }
 
+
 static void produce_report(void)
 {
-    json_t * report;
+    json_t *report;
+    json_error_t error;
+    double bytes_temp = bytes_sent * 1.0;
+    double packets_temp = packets_sent * 1.0;
 
-    report = json_pack("{s:i, s:i, s:f, s:i, s:i, s:f, s:f}",
-                       "bytes", bytes_sent,
-                       "retransmits", 0,
-                       "jitter", 0.0,
-                       "errors", 0,
-                       "packets", packets_sent,
-                       "start_time", 0,
-                       "end_time", time_now() - start_time);
-    json_dumpf(report, stdout, 0);
+    fprintf(stderr, "creating a report\n"); 
+
+    report = json_pack_ex(&error, 0, "{s:f, s:i, s:f, s:i, s:f, s:f, s:f}",
+                       "bytes", bytes_temp, //s:f
+                       "retransmits", 0, //s:i
+                       "jitter", 0.0, //s:f
+                       "errors", 0, //s:i
+                       "packets", packets_temp, //s:f
+                       "start_time", 0.0, //s:f
+                       "end_time", time_now() - start_time); //s:f
+    if (report == NULL) {
+        fprintf(stderr, 
+                "Failed to generate a report %s %s %d %d %d\n",
+                error.text, error.source, error.line, error.column, error.position);
+    } else {
+        fprintf(stderr, "report:"); 
+        json_dumpf(report, stderr, 0);
+        fprintf(stderr, "\n"); 
+    }
     json_send(s, report);
     json_object_clear(report);
     free(report);
@@ -181,7 +195,6 @@ static void send_data(int d)
             packets_sent ++;
         }
         if (report_needed) {
-            fprintf(stderr, "Producing report \n");
             produce_report();
             report_needed = false;
         }
@@ -266,7 +279,6 @@ static int connect_test(json_t *config, json_t *params)
 
 static void handler(int sig, siginfo_t *si, void *uc)
 {
-   
     switch (si->si_value.sival_int) {
         case END_TIMER:
             running = false;
@@ -301,7 +313,7 @@ static int create_timers(json_t *config, json_t *params)
 
     sigemptyset(&mask);
     sigaddset(&mask, SIGALRM);
-    if (sigprocmask(SIG_SETMASK, &mask, NULL) == -1) {
+    if (sigprocmask(SIG_UNBLOCK, &mask, NULL) == -1) {
         perror("Sigprocmask ");
         return -1;
     }
@@ -323,9 +335,7 @@ static int create_timers(json_t *config, json_t *params)
     if (timer_create(CLOCK_MONOTONIC, &sev, &end_timer) < 0) {
         perror("End timer create");
         return -1;
-    } else {
-        fprintf(stderr, "end time is %f %d", timer_value, json_integer_value(value));
-    }
+    } 
 
     its.it_value.tv_sec = (int) timer_value;
     its.it_value.tv_nsec = (int)((timer_value - its.it_value.tv_sec) * 1000000000.0);
@@ -334,9 +344,7 @@ static int create_timers(json_t *config, json_t *params)
     if (timer_settime(end_timer, 0, &its, NULL) == -1) { 
         perror("End timer set");
         return -1;
-    } else {
-        fprintf(stderr, "End timer set to %d\n", (int)timer_value);
-    }
+    } 
 
     sev.sigev_notify = SIGEV_SIGNAL;
     sev.sigev_signo = SIGALRM;
@@ -355,9 +363,7 @@ static int create_timers(json_t *config, json_t *params)
     if (timer_settime(failsafe_timer, 0, &its, NULL) == -1) { 
         perror("Failsafe timer set");
         return -1;
-    } else {
-        fprintf(stderr, "Failsafe timer set to %d\n", (int)timer_value);
-    }
+    } 
 
 
     value = json_object_get(config, "interval");
@@ -383,12 +389,11 @@ static int create_timers(json_t *config, json_t *params)
     its.it_value.tv_sec = its.it_interval.tv_sec = (int) timer_value;
     its.it_value.tv_nsec = its.it_interval.tv_nsec = (int)((timer_value - its.it_value.tv_sec) * 1000000000.0);
 
+
     if (timer_settime(report_timer, 0, &its, NULL) == -1) { 
         perror("Report timer set ");
         return -1;
-    } else {
-        fprintf(stderr, "Report timer set to %d\n", (int)timer_value);
-    }
+    } 
     return 0;
 }
  

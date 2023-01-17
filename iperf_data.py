@@ -112,6 +112,7 @@ class Client():
         self.total = 0
         self.sock = None
         self.start_time = 0
+        self.lock = threading.Lock()
 
     # pylint: disable=unused-argument
     def send(self, now):
@@ -144,6 +145,7 @@ class Client():
     def run_test(self):
         '''Run the actual test'''
         self.start_time = now = time.clock_gettime(time.CLOCK_MONOTONIC)
+        self.lock.acquire()
         try:
             while now < self.start_time + self.params["time"]:
                 if self.params.get("reverse") is None:
@@ -167,6 +169,7 @@ class Client():
                         "packets": self.counters.packet_count,
                         "start_time": 0,
                         "end_time":now - self.start_time})
+        self.lock.release()
 
     def connect(self):
         '''Connect to the other side'''
