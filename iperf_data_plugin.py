@@ -26,16 +26,20 @@ class PluginClient(Client):
         '''Run the actual test'''
         self.start_time = now = time.clock_gettime(time.CLOCK_MONOTONIC)
         self.sock.send(struct.pack(STATE, TEST_START))
+        self.lock.acquire()
         try:
             while now < self.start_time + self.params["time"]:
                 data = json_recv(self.sock)
                 if data is not None:
                     self.result.update(data)
-                if data is None or self.done:
+                if data is None:
+                    break
+                if data["final"]:
                     break
                 time.sleep(0.1)
         except BrokenPipeError:
             pass
+        self.lock.release()
 
     def connect(self):
         '''Connect to the other side'''

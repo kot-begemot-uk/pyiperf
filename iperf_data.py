@@ -153,7 +153,7 @@ class Client():
                 else:
                     self.receive(now)
                 now = time.clock_gettime(time.CLOCK_MONOTONIC)
-                if self.done: # reading/storing a single var in python is atomic
+                if self.done:
                     break
         except ConnectionRefusedError:
             pass

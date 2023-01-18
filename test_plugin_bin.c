@@ -17,6 +17,7 @@
 #include <time.h>
 #include <math.h>
 #include <stdbool.h>
+#include <errno.h>
 #include <arpa/inet.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -150,23 +151,24 @@ static double time_now(void)
 }
 
 
-static void produce_report(void)
+static void produce_report(bool final)
 {
     json_t *report;
     json_error_t error;
     double bytes_temp = bytes_sent * 1.0;
     double packets_temp = packets_sent * 1.0;
 
-    fprintf(stderr, "creating a report\n"); 
+    fprintf(stderr, "creating a report %d\n", final); 
 
-    report = json_pack_ex(&error, 0, "{s:f, s:i, s:f, s:i, s:f, s:f, s:f}",
+    report = json_pack_ex(&error, 0, "{s:f, s:i, s:f, s:i, s:f, s:f, s:f, s:b}",
                        "bytes", bytes_temp, //s:f
                        "retransmits", 0, //s:i
                        "jitter", 0.0, //s:f
                        "errors", 0, //s:i
                        "packets", packets_temp, //s:f
                        "start_time", 0.0, //s:f
-                       "end_time", time_now() - start_time); //s:f
+                       "end_time", time_now() - start_time, //s:f
+                       "final", final); //s:b
     if (report == NULL) {
         fprintf(stderr, 
                 "Failed to generate a report %s %s %d %d %d\n",
@@ -176,7 +178,9 @@ static void produce_report(void)
         json_dumpf(report, stderr, 0);
         fprintf(stderr, "\n"); 
     }
-    json_send(s, report);
+    if (json_send(s, report) != 0) {
+        fprintf(stderr, "failed to send report\n"); 
+    }
     json_object_clear(report);
     free(report);
 }
@@ -193,15 +197,17 @@ static void send_data(int d)
         if (ret > 0) {
             bytes_sent += ret;
             packets_sent ++;
+        } else {
+            if (errno != EAGAIN)
+                break;
         }
         if (report_needed) {
-            produce_report();
+            produce_report(false);
             report_needed = false;
         }
     }
-    if (report_needed) {
-        produce_report();
-    }
+    /* Produce final report regardless of "needed" flag */
+    produce_report(true);
 }
 
 #define COOKIE_SIZE 37
@@ -284,6 +290,7 @@ static void handler(int sig, siginfo_t *si, void *uc)
             running = false;
             break;
         case FAILSAFE_TIMER:
+            fprintf(stderr, "Failsafe timer\n");
             exit(1); /* brutal, but if we reached this point - who cares */
             break;
         case REPORT_TIMER:
@@ -302,7 +309,14 @@ static int create_timers(json_t *config, json_t *params)
     struct sigaction sa;
     sigset_t mask;
 
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGPIPE);
+    if (sigprocmask(SIG_BLOCK, &mask, NULL) == -1) {
+        perror("Sigprocmask ");
+        return -1;
+    }
 
+    sigemptyset(&mask);
     sa.sa_flags = SA_SIGINFO;
     sa.sa_sigaction = handler;
     sigemptyset(&sa.sa_mask);

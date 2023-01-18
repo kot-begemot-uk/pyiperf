@@ -104,7 +104,6 @@ class TestClient():
         self.results["sender_has_retransmits"] = 0
         self.results["streams"] = []
 
-
         for stream in self.tx_streams:
             stream.lock.acquire()
             self.results["streams"].append(stream.result)
