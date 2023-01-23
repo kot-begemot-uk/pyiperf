@@ -13,6 +13,7 @@ import struct
 import socket
 import threading
 import time
+from iperf_utils import bandwidth
 
 FORMAT32 = "!iii"
 FORMAT64 = "!iil"
@@ -113,15 +114,18 @@ class Client():
         self.sock = None
         self.start_time = 0
         self.lock = threading.Lock()
+        try:
+            self.limit = bandwidth(self.config["bitrate"])
+        except KeyError:
+            self.limit = 0
 
     # pylint: disable=unused-argument
     def send(self, now):
         '''Send a UDP frame with appropriate information for jitter/delay'''
         try:
-            if self.params.get("bandwidth") is None or \
-               ((not now == self.start_time) and \
-               self.total/(now - self.start_time) <= self.params["bandwidth"]/8 or \
-               self.params["bandwidth"] == 0):
+            if ((not now == self.start_time) and \
+               self.total/(now - self.start_time) <= self.limit or \
+               self.limit == 0):
                 self.total = self.total + self.sock.send(self.buff)
         except BlockingIOError:
             pass

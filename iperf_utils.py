@@ -12,10 +12,37 @@
 import json
 import random
 import struct
+import re
 
 RNDCHARS = "abcdefghijklmnopqrstuvwxyz234567"
 COOKIE_SIZE = 37
 JSONL = "!i"
+
+BWIDTH_RE = re.compile(r"(\d+)([K,k,M,m,G,g])")
+
+def bandwidth(arg):
+    '''Translate bandwidth prefix'''
+    ret = arg
+    try:
+        match = BWIDTH_RE.search(arg)
+        if match is not None:
+            ret = int(match.group(1))
+            if match.group(2) == 'K':
+                ret = 125 * int(match.group(1))
+            if match.group(2) == 'M':
+                ret =  125000 * int(match.group(1))
+            if match.group(2) == 'G':
+                ret = 125000000 * int(match.group(1))
+            if match.group(2) == 'k':
+                ret = 1000 * int(match.group(1))
+            if match.group(2) == 'm':
+                ret = 1000000 * int(match.group(1))
+            if match.group(2) == 'g':
+                ret = 1000000000 * int(match.group(1))
+    except TypeError:
+        pass
+    return int(ret)
+
 
 def json_send(sock, data):
     '''Send JSON data'''

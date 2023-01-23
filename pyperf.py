@@ -195,7 +195,7 @@ def main():
     aparser.add_argument(
         '--bitrate',
         help='target bitrate in bits/sec. Default - 1Mb/s UDP, unlimited for TCP',
-        type=int)
+        type=str)
 
     aparser.add_argument(
         '--pacing-timer',
